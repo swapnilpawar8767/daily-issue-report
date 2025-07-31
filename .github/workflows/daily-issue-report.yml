@@ -43,8 +43,8 @@ jobs:
 
           def format_section(title, issues):
               if not issues:
-                  return f"**{title}**\n> _None_\n"
-              lines = [f"**{title}**"]
+                  return f"*{title}*\n> _None_\n"
+              lines = [f"*{title}*"]
               for i in issues:
                   number = i["number"]
                   title = i["title"]
@@ -65,7 +65,7 @@ jobs:
               issues = response.json()
 
               if not isinstance(issues, list):
-                  report.append(f"## 📁 **Repository: {repo}**\n> ⚠️ Failed to fetch issues.\n")
+                  report.append(f"__📁 Repository: {repo}__\n> ⚠️ Failed to fetch issues.\n")
                   continue
 
               opened_recently = []
@@ -87,11 +87,11 @@ jobs:
                   elif state == "open" and created < since_dt:
                       still_open.append(issue)
 
-              report.append(f"## 📁 **Repository: {repo}**\n")
+              report.append(f"__📁 Repository: {repo}__\n")
               report.append(format_section("🟢 Opened in last 24 hours", opened_recently))
               report.append(format_section("🔴 Closed in last 24 hours", closed_recently))
               report.append(format_section("🟠 Still Open (older than 24h)", still_open))
-              
+
               if index < len(repos) - 1:
                   report.append("---\n")
 
