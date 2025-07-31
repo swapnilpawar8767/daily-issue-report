@@ -2,7 +2,7 @@ name: Daily Issue Report
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # 9:00 AM IST = 3:30 AM UTC
+    - cron: '30 3 * * *'  # 9:00 AM IST
   workflow_dispatch:
 
 jobs:
@@ -20,17 +20,17 @@ jobs:
           echo "repos=$repos" >> $GITHUB_OUTPUT
 
       - name: Generate report
-        id: generate_report
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           echo "📅 GitHub Issue Report — $(date -u +'%Y-%m-%d')" > report.txt
           echo "" >> report.txt
 
-          echo 'import requests
+          cat <<EOF > script.py
+import requests
 from datetime import datetime, timedelta
 
-HEADERS = {"Authorization": f"Bearer \"${{ secrets.GH_TOKEN }}\""}
+HEADERS = {"Authorization": f"Bearer ${GH_TOKEN}"}
 repos = "${{ steps.read_repos.outputs.repos }}".split()
 since_dt = datetime.utcnow() - timedelta(days=1)
 since = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -40,7 +40,7 @@ def format_section(title, issues):
         return f"**{title}**\\n> _None_"
     lines = [f"**{title}**"]
     for issue in issues:
-        lines.append(f"- #{issue[\"number\"]}: {issue[\"title\"]} [View]({issue[\"html_url\"]}) (by @{issue[\"user\"][\"login\"]})")
+        lines.append(f"- #{issue['number']}: {issue['title']} [View]({issue['html_url']}) (by @{issue['user']['login']})")
     return "\\n".join(lines)
 
 report = []
@@ -51,7 +51,7 @@ for repo in repos:
     response = requests.get(url, headers=HEADERS)
     issues = response.json()
 
-    repo_report = [f"### 📁 `{repo}`"]
+    repo_report = [f"### 📁 {repo}"]
 
     if not isinstance(issues, list):
         repo_report.append("> ⚠️ Failed to fetch issues.\\n")
@@ -83,7 +83,7 @@ for repo in repos:
     report.append("\\n".join(repo_report))
 
 print("\\n\\n".join(report))
-' > script.py
+EOF
 
           python3 script.py >> report.txt
 
