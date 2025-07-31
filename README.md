@@ -7,11 +7,11 @@ This GitHub Actions workflow collects **GitHub Issues** from multiple repositori
 
 ## 📁 Repository Structure
 
-daily-issue-reporter/
+>daily-issue-reporter/
 >
-
-├── repos.txt
-└── .github/workflows/daily-issue-report.yml
+>├── repos.txt
+>
+>└── .github/workflows/daily-issue-report.yml
 ---
 
 ## 🚀 Features
