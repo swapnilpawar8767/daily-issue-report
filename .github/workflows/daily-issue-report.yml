@@ -2,7 +2,7 @@ name: Daily Issue Report
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # Runs daily at 9:00 AM IST, # 9:00 AM IST = 3:30 AM UTC
+    - cron: '30 3 * * *'  # Runs daily at 9:00 AM IST
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout this repo
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -18,10 +18,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install dependencies
+      - name: Install requests
         run: pip install requests
 
-      - name: Generate and Send Issue Report
+      - name: Run Issue Reporter Script
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
@@ -33,61 +33,82 @@ jobs:
 
           GH_TOKEN = os.getenv("GH_TOKEN")
           TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
+
           headers = {
               "Authorization": f"Bearer {GH_TOKEN}",
               "Accept": "application/vnd.github+json"
           }
 
-          since = datetime.utcnow() - timedelta(days=1)
-          since_iso = since.isoformat() + "Z"
+          since_dt = datetime.utcnow() - timedelta(days=1)
+          since = since_dt.isoformat() + "Z"
 
           with open("repos.txt", "r") as f:
               repos = [line.strip() for line in f if line.strip()]
 
-          report = f"📅 **GitHub Issue Report** ({datetime.utcnow().date()})\n\n"
+          report_lines = [f"📅 **GitHub Issue Report** ({datetime.utcnow().date()})\n"]
 
           for repo in repos:
               owner, name = repo.split("/")
-              url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since_iso}"
-              r = requests.get(url, headers=headers)
+              issues_url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since}"
+              r = requests.get(issues_url, headers=headers)
               issues = r.json()
 
-              opened_24h = []
-              closed_24h = []
+              if not isinstance(issues, list):
+                  report_lines.append(f"### 📁 {repo}\n⚠️ Could not fetch issues.\n")
+                  continue
+
+              opened_recently = []
+              closed_recently = []
               still_open = []
 
               for issue in issues:
-                  if 'pull_request' in issue:
-                      continue  # skip PRs
-                  created_at = datetime.strptime(issue['created_at'], "%Y-%m-%dT%H:%M:%SZ")
-                  closed_at = issue.get('closed_at')
-                  state = issue['state']
-                  number = issue['number']
-                  title = issue['title']
-                  url = issue['html_url']
-                  author = issue['user']['login']
+                  if "pull_request" in issue:
+                      continue  # Skip PRs
 
-                  if created_at >= since:
-                      opened_24h.append(f"- #{number}: {title} [View]({url}) (by @{author})")
-                  elif closed_at:
-                      closed_at_dt = datetime.strptime(closed_at, "%Y-%m-%dT%H:%M:%SZ")
-                      if closed_at_dt >= since:
-                          closed_24h.append(f"- #{number}: {title} [View]({url}) (by @{author})")
-                  elif state == "open" and created_at < since:
-                      still_open.append(f"- #{number}: {title} [View]({url}) (opened on {created_at.date()} by @{author})")
+                  created_at = datetime.strptime(issue["created_at"], "%Y-%m-%dT%H:%M:%SZ")
+                  state = issue["state"]
+                  closed_at_str = issue.get("closed_at")
+                  closed_at = datetime.strptime(closed_at_str, "%Y-%m-%dT%H:%M:%SZ") if closed_at_str else None
 
-              report += f"### 📁 {repo}\n"
-              report += "🟢 **Opened in last 24 hours:**\n" + ("\n".join(opened_24h) if opened_24h else "_None_") + "\n\n"
-              report += "🔴 **Closed in last 24 hours:**\n" + ("\n".join(closed_24h) if closed_24h else "_None_") + "\n\n"
-              report += "🟠 **Still Open (older than 24h):**\n" + ("\n".join(still_open) if still_open else "_None_") + "\n\n"
+                  if state == "open" and created_at >= since_dt:
+                      opened_recently.append(issue)
+                  elif state == "closed" and closed_at and closed_at >= since_dt:
+                      closed_recently.append(issue)
+                  elif state == "open" and created_at < since_dt:
+                      still_open.append(issue)
+
+              report_lines.append(f"### 📁 {repo}")
+
+              if opened_recently:
+                  report_lines.append("🟢 **Opened in last 24 hours:**")
+                  for i in opened_recently:
+                      report_lines.append(f"- #{i['number']}: {i['title']} [View]({i['html_url']}) (by @{i['user']['login']})")
+              else:
+                  report_lines.append("🟢 Opened in last 24 hours: None")
+
+              if closed_recently:
+                  report_lines.append("🔴 **Closed in last 24 hours:**")
+                  for i in closed_recently:
+                      report_lines.append(f"- #{i['number']}: {i['title']} [View]({i['html_url']}) (by @{i['user']['login']})")
+              else:
+                  report_lines.append("🔴 Closed in last 24 hours: None")
+
+              if still_open:
+                  report_lines.append("🟠 **Still Open (older than 24h):**")
+                  for i in still_open:
+                      report_lines.append(f"- #{i['number']}: {i['title']} [View]({i['html_url']}) (by @{i['user']['login']})")
+              else:
+                  report_lines.append("🟠 Still Open (older than 24h): None")
+
+              report_lines.append("")  # spacing
 
           payload = {
-              "text": report
+              "text": "\n".join(report_lines)
           }
 
           response = requests.post(TEAMS_WEBHOOK_URL, json=payload)
           if response.status_code != 200:
-              print("❌ Failed to send message:", response.status_code, response.text)
+              print(f"❌ Failed to send message: {response.status_code}\n{response.text}")
           else:
-              print("✅ Report sent to Microsoft Teams.")
+              print("✅ Report sent successfully.")
           EOF
