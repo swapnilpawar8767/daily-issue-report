@@ -58,14 +58,14 @@ jobs:
 
           report = [f"📅 **GitHub Issue Report — {datetime.utcnow().strftime('%Y-%m-%d')}**\n"]
 
-          for repo in repos:
+          for index, repo in enumerate(repos):
               owner, name = repo.split("/")
               url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since}"
               response = requests.get(url, headers=HEADERS)
               issues = response.json()
 
               if not isinstance(issues, list):
-                  report.append(f"### 📁 `{repo}`\n> ⚠️ Failed to fetch issues.\n")
+                  report.append(f"### 📁 Repository: {repo}\n> ⚠️ Failed to fetch issues.\n")
                   continue
 
               opened_recently = []
@@ -91,6 +91,10 @@ jobs:
               report.append(format_section("🟢 Opened in last 24 hours", opened_recently))
               report.append(format_section("🔴 Closed in last 24 hours", closed_recently))
               report.append(format_section("🟠 Still Open (older than 24h)", still_open))
+              
+              # Add separator line if not the last repository
+              if index < len(repos) - 1:
+                  report.append("---\n")
 
           payload = { "text": "\n".join(report) }
 
