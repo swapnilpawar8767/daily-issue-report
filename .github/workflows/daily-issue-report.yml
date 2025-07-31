@@ -43,7 +43,7 @@ jobs:
 
           def format_section(title, issues):
               if not issues:
-                  return f"**{title}**\n> _None_\n"
+                  return f"**{title}**\n_None_\n"
               lines = [f"**{title}**"]
               for i in issues:
                   number = i["number"]
@@ -65,7 +65,7 @@ jobs:
               issues = response.json()
 
               if not isinstance(issues, list):
-                  report.append(f"### 📁 `{repo}`\n> ⚠️ Failed to fetch issues.\n")
+                  report.append(f"📁 `{repo}`\n⚠️ Failed to fetch issues.\n")
                   continue
 
               opened_recently = []
@@ -87,13 +87,16 @@ jobs:
                   elif state == "open" and created < since_dt:
                       still_open.append(issue)
 
-              section = [f"### 📁 `{repo}`"]
-              section.append(format_section("🟢 Opened in last 24 hours", opened_recently))
-              section.append(format_section("🔴 Closed in last 24 hours", closed_recently))
-              section.append(format_section("🟠 Still Open (older than 24h)", still_open))
+              section = [
+                  f"📁 `{repo}`",
+                  format_section("🟢 Opened in last 24 hours", opened_recently),
+                  format_section("🔴 Closed in last 24 hours", closed_recently),
+                  format_section("🟠 Still Open (older than 24h)", still_open)
+              ]
+
               report.append("\n".join(section))
 
-          payload = { "text": "\n".join(report) }
+          payload = { "text": "\n\n".join(report) }
 
           res = requests.post(TEAMS_WEBHOOK_URL, json=payload)
           if res.status_code != 200:
