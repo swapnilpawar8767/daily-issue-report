@@ -1,1 +1,93 @@
+name: Daily Issue Report
 
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at 5:30 AM IST (00:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  issue-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate and Send Issue Report
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          python <<EOF
+          import os
+          import requests
+          from datetime import datetime, timedelta
+
+          GH_TOKEN = os.getenv("GH_TOKEN")
+          TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
+          headers = {
+              "Authorization": f"Bearer {GH_TOKEN}",
+              "Accept": "application/vnd.github+json"
+          }
+
+          since = datetime.utcnow() - timedelta(days=1)
+          since_iso = since.isoformat() + "Z"
+
+          with open("repos.txt", "r") as f:
+              repos = [line.strip() for line in f if line.strip()]
+
+          report = f"📅 **GitHub Issue Report** ({datetime.utcnow().date()})\n\n"
+
+          for repo in repos:
+              owner, name = repo.split("/")
+              url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since_iso}"
+              r = requests.get(url, headers=headers)
+              issues = r.json()
+
+              opened_24h = []
+              closed_24h = []
+              still_open = []
+
+              for issue in issues:
+                  if 'pull_request' in issue:
+                      continue  # skip PRs
+                  created_at = datetime.strptime(issue['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+                  closed_at = issue.get('closed_at')
+                  state = issue['state']
+                  number = issue['number']
+                  title = issue['title']
+                  url = issue['html_url']
+                  author = issue['user']['login']
+
+                  if created_at >= since:
+                      opened_24h.append(f"- #{number}: {title} [View]({url}) (by @{author})")
+                  elif closed_at:
+                      closed_at_dt = datetime.strptime(closed_at, "%Y-%m-%dT%H:%M:%SZ")
+                      if closed_at_dt >= since:
+                          closed_24h.append(f"- #{number}: {title} [View]({url}) (by @{author})")
+                  elif state == "open" and created_at < since:
+                      still_open.append(f"- #{number}: {title} [View]({url}) (opened on {created_at.date()} by @{author})")
+
+              report += f"### 📁 {repo}\n"
+              report += "🟢 **Opened in last 24 hours:**\n" + ("\n".join(opened_24h) if opened_24h else "_None_") + "\n\n"
+              report += "🔴 **Closed in last 24 hours:**\n" + ("\n".join(closed_24h) if closed_24h else "_None_") + "\n\n"
+              report += "🟠 **Still Open (older than 24h):**\n" + ("\n".join(still_open) if still_open else "_None_") + "\n\n"
+
+          payload = {
+              "text": report
+          }
+
+          response = requests.post(TEAMS_WEBHOOK_URL, json=payload)
+          if response.status_code != 200:
+              print("❌ Failed to send message:", response.status_code, response.text)
+          else:
+              print("✅ Report sent to Microsoft Teams.")
+          EOF
