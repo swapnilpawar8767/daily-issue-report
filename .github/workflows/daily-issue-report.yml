@@ -10,87 +10,94 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout this repo
         uses: actions/checkout@v3
 
-      - name: Read repository list
-        id: read_repos
-        run: |
-          repos=$(cat repos.txt | xargs | tr '\n' ' ')
-          echo "repos=$repos" >> $GITHUB_OUTPUT
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
 
-      - name: Generate report
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate & Send Report
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
-          echo "📅 GitHub Issue Report — $(date -u +'%Y-%m-%d')" > report.txt
-          echo "" >> report.txt
+          python <<EOF
+          import os
+          import requests
+          from datetime import datetime, timedelta
 
-          cat <<EOF > script.py
-import requests
-from datetime import datetime, timedelta
+          GH_TOKEN = os.getenv("GH_TOKEN")
+          TEAMS_WEBHOOK_URL = os.getenv("TEAMS_WEBHOOK_URL")
+          HEADERS = {
+              "Authorization": f"Bearer {GH_TOKEN}",
+              "Accept": "application/vnd.github+json"
+          }
 
-HEADERS = {"Authorization": f"Bearer ${GH_TOKEN}"}
-repos = "${{ steps.read_repos.outputs.repos }}".split()
-since_dt = datetime.utcnow() - timedelta(days=1)
-since = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+          since_dt = datetime.utcnow() - timedelta(days=1)
+          since = since_dt.isoformat() + "Z"
 
-def format_section(title, issues):
-    if not issues:
-        return f"**{title}**\\n> _None_"
-    lines = [f"**{title}**"]
-    for issue in issues:
-        lines.append(f"- #{issue['number']}: {issue['title']} [View]({issue['html_url']}) (by @{issue['user']['login']})")
-    return "\\n".join(lines)
+          def format_section(title, issues):
+              if not issues:
+                  return f"**{title}**\n> _None_\n"
+              lines = [f"**{title}**"]
+              for i in issues:
+                  number = i["number"]
+                  title = i["title"]
+                  url = i["html_url"]
+                  author = i["user"]["login"]
+                  lines.append(f"- #{number}: {title} [View]({url}) (by @{author})")
+              return "\n".join(lines) + "\n"
 
-report = []
+          with open("repos.txt", "r") as f:
+              repos = [line.strip() for line in f if line.strip()]
 
-for repo in repos:
-    owner, name = repo.split("/")
-    url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since}"
-    response = requests.get(url, headers=HEADERS)
-    issues = response.json()
+          report = [f"📅 **GitHub Issue Report — {datetime.utcnow().strftime('%Y-%m-%d')}**\n"]
 
-    repo_report = [f"### 📁 {repo}"]
+          for repo in repos:
+              owner, name = repo.split("/")
+              url = f"https://api.github.com/repos/{owner}/{name}/issues?state=all&since={since}"
+              response = requests.get(url, headers=HEADERS)
+              issues = response.json()
 
-    if not isinstance(issues, list):
-        repo_report.append("> ⚠️ Failed to fetch issues.\\n")
-        report.append("\\n".join(repo_report))
-        continue
+              if not isinstance(issues, list):
+                  report.append(f"### 📁 `{repo}`\n> ⚠️ Failed to fetch issues.\n")
+                  continue
 
-    opened_recently = []
-    closed_recently = []
-    still_open = []
+              opened_recently = []
+              closed_recently = []
+              still_open = []
 
-    for issue in issues:
-        if "pull_request" in issue:
-            continue
-        created = datetime.strptime(issue["created_at"], "%Y-%m-%dT%H:%M:%SZ")
-        closed = issue.get("closed_at")
-        closed = datetime.strptime(closed, "%Y-%m-%dT%H:%M:%SZ") if closed else None
-        state = issue["state"]
+              for issue in issues:
+                  if "pull_request" in issue:
+                      continue
+                  created = datetime.strptime(issue["created_at"], "%Y-%m-%dT%H:%M:%SZ")
+                  closed = issue.get("closed_at")
+                  closed = datetime.strptime(closed, "%Y-%m-%dT%H:%M:%SZ") if closed else None
+                  state = issue["state"]
 
-        if state == "open" and created >= since_dt:
-            opened_recently.append(issue)
-        elif state == "closed" and closed and closed >= since_dt:
-            closed_recently.append(issue)
-        elif state == "open" and created < since_dt:
-            still_open.append(issue)
+                  if state == "open" and created >= since_dt:
+                      opened_recently.append(issue)
+                  elif state == "closed" and closed and closed >= since_dt:
+                      closed_recently.append(issue)
+                  elif state == "open" and created < since_dt:
+                      still_open.append(issue)
 
-    repo_report.append(format_section("🟢 Opened in last 24 hours", opened_recently))
-    repo_report.append(format_section("🔴 Closed in last 24 hours", closed_recently))
-    repo_report.append(format_section("🟠 Still Open (older than 24h)", still_open))
-    report.append("\\n".join(repo_report))
+              section = [f"### 📁 `{repo}`"]
+              section.append(format_section("🟢 Opened in last 24 hours", opened_recently))
+              section.append(format_section("🔴 Closed in last 24 hours", closed_recently))
+              section.append(format_section("🟠 Still Open (older than 24h)", still_open))
+              report.append("\n".join(section))
 
-print("\\n\\n".join(report))
-EOF
+          payload = { "text": "\n".join(report) }
 
-          python3 script.py >> report.txt
-
-      - name: Send to Microsoft Teams
-        env:
-          WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK }}
-        run: |
-          text=$(cat report.txt | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
-          payload="{\"text\": \"$text\"}"
-          curl -H "Content-Type: application/json" -d "$payload" "$WEBHOOK_URL"
+          res = requests.post(TEAMS_WEBHOOK_URL, json=payload)
+          if res.status_code != 200:
+              print("❌ Failed to send report:", res.status_code, res.text)
+          else:
+              print("✅ Report sent successfully.")
+          EOF
