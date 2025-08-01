@@ -2,7 +2,7 @@ name: Daily Issue Report
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # 9:00 AM IST
+    - cron: '50 3 * * *'  # 9:00 AM IST
   workflow_dispatch:
 
 jobs:
