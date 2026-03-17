@@ -189,4 +189,3 @@ jobs:
             echo "TRIVY_TEAM_WEBHOOK secret is not set. Skipping Teams notification."
           fi
 
-
